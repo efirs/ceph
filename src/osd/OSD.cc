@@ -8278,22 +8278,18 @@ void OSD::ShardedOpWQ::_process(uint32_t thread_index, heartbeat_handle_d *hb ) 
 
   ShardData* sdata = shard_list[shard_index];
   assert(NULL != sdata);
-  sdata->sdata_op_ordering_lock.Lock();
+  sdata->sdata_lock.Lock();
   if (sdata->pqueue.empty()) {
-    sdata->sdata_op_ordering_lock.Unlock();
     osd->cct->get_heartbeat_map()->reset_timeout(hb, 4, 0);
-    sdata->sdata_lock.Lock();
     sdata->sdata_cond.WaitInterval(osd->cct, sdata->sdata_lock, utime_t(2, 0));
-    sdata->sdata_lock.Unlock();
-    sdata->sdata_op_ordering_lock.Lock();
     if(sdata->pqueue.empty()) {
-      sdata->sdata_op_ordering_lock.Unlock();
+      sdata->sdata_lock.Unlock();
       return;
     }
   }
   pair<PGRef, PGQueueable> item = sdata->pqueue.dequeue();
   sdata->pg_for_processing[&*(item.first)].push_back(item.second);
-  sdata->sdata_op_ordering_lock.Unlock();
+  sdata->sdata_lock.Unlock();
   ThreadPool::TPHandle tp_handle(osd->cct, hb, timeout_interval, 
     suicide_interval);
 
@@ -8301,7 +8297,7 @@ void OSD::ShardedOpWQ::_process(uint32_t thread_index, heartbeat_handle_d *hb ) 
 
   boost::optional<PGQueueable> op;
   {
-    Mutex::Locker l(sdata->sdata_op_ordering_lock);
+    Mutex::Locker l(sdata->sdata_lock);
     if (!sdata->pg_for_processing.count(&*(item.first))) {
       (item.first)->unlock();
       return;
@@ -8359,7 +8355,7 @@ void OSD::ShardedOpWQ::_enqueue(pair<PGRef, PGQueueable> item) {
   assert (NULL != sdata);
   unsigned priority = item.second.get_priority();
   unsigned cost = item.second.get_cost();
-  sdata->sdata_op_ordering_lock.Lock();
+  sdata->sdata_lock.Lock();
  
   if (priority >= CEPH_MSG_PRIO_LOW)
     sdata->pqueue.enqueue_strict(
@@ -8368,12 +8364,10 @@ void OSD::ShardedOpWQ::_enqueue(pair<PGRef, PGQueueable> item) {
     sdata->pqueue.enqueue(
       item.second.get_owner(),
       priority, cost, item);
-  sdata->sdata_op_ordering_lock.Unlock();
 
-  sdata->sdata_lock.Lock();
   sdata->sdata_cond.SignalOne();
-  sdata->sdata_lock.Unlock();
 
+  sdata->sdata_lock.Unlock();
 }
 
 void OSD::ShardedOpWQ::_enqueue_front(pair<PGRef, PGQueueable> item) {
@@ -8382,7 +8376,7 @@ void OSD::ShardedOpWQ::_enqueue_front(pair<PGRef, PGQueueable> item) {
 
   ShardData* sdata = shard_list[shard_index];
   assert (NULL != sdata);
-  sdata->sdata_op_ordering_lock.Lock();
+  sdata->sdata_lock.Lock();
   if (sdata->pg_for_processing.count(&*(item.first))) {
     sdata->pg_for_processing[&*(item.first)].push_front(item.second);
     item.second = sdata->pg_for_processing[&*(item.first)].back();
@@ -8399,11 +8393,9 @@ void OSD::ShardedOpWQ::_enqueue_front(pair<PGRef, PGQueueable> item) {
       item.second.get_owner(),
       priority, cost, item);
 
-  sdata->sdata_op_ordering_lock.Unlock();
-  sdata->sdata_lock.Lock();
   sdata->sdata_cond.SignalOne();
-  sdata->sdata_lock.Unlock();
 
+  sdata->sdata_lock.Unlock();
 }
 
 

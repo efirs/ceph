@@ -1687,16 +1687,14 @@ private:
   class ShardedOpWQ: public ShardedThreadPool::ShardedWQ < pair <PGRef, PGQueueable> > {
 
     struct ShardData {
-      Mutex sdata_lock;
       Cond sdata_cond;
-      Mutex sdata_op_ordering_lock;
+      Mutex sdata_lock;
       map<PG*, list<PGQueueable> > pg_for_processing;
       PrioritizedQueue< pair<PGRef, PGQueueable>, entity_inst_t> pqueue;
       ShardData(
 	string lock_name, string ordering_lock,
 	uint64_t max_tok_per_prio, uint64_t min_cost, CephContext *cct)
 	: sdata_lock(lock_name.c_str(), false, true, false, cct),
-	  sdata_op_ordering_lock(ordering_lock.c_str(), false, true, false, cct),
 	  pqueue(max_tok_per_prio, min_cost) {}
     };
     
@@ -1750,11 +1748,11 @@ private:
 	char lock_name[32] = {0};
 	snprintf(lock_name, sizeof(lock_name), "%s%d", "OSD:ShardedOpWQ:", i);
 	assert (NULL != sdata);
-	sdata->sdata_op_ordering_lock.Lock();
+	sdata->sdata_lock.Lock();
 	f->open_object_section(lock_name);
 	sdata->pqueue.dump(f);
 	f->close_section();
-	sdata->sdata_op_ordering_lock.Unlock();
+	sdata->sdata_lock.Unlock();
       }
     }
 
@@ -1772,10 +1770,10 @@ private:
       uint32_t shard_index = pg->get_pgid().ps()% shard_list.size();
       sdata = shard_list[shard_index];
       assert(sdata != NULL);
-      sdata->sdata_op_ordering_lock.Lock();
+      sdata->sdata_lock.Lock();
       sdata->pqueue.remove_by_filter(Pred(pg));
       sdata->pg_for_processing.erase(pg);
-      sdata->sdata_op_ordering_lock.Unlock();
+      sdata->sdata_lock.Unlock();
     }
 
     void dequeue_and_get_ops(PG *pg, list<OpRequestRef> *dequeued) {
@@ -1786,7 +1784,7 @@ private:
       assert(sdata != NULL);
       assert(dequeued);
       list<pair<PGRef, PGQueueable> > _dequeued;
-      sdata->sdata_op_ordering_lock.Lock();
+      sdata->sdata_lock.Lock();
       sdata->pqueue.remove_by_filter(Pred(pg), &_dequeued);
       for (list<pair<PGRef, PGQueueable> >::iterator i = _dequeued.begin();
 	   i != _dequeued.end(); ++i) {
@@ -1806,14 +1804,14 @@ private:
 	}
 	sdata->pg_for_processing.erase(iter);
       }
-      sdata->sdata_op_ordering_lock.Unlock();
+      sdata->sdata_lock.Unlock();
     }
  
     bool is_shard_empty(uint32_t thread_index) {
       uint32_t shard_index = thread_index % num_shards; 
       ShardData* sdata = shard_list[shard_index];
       assert(NULL != sdata);
-      Mutex::Locker l(sdata->sdata_op_ordering_lock);
+      Mutex::Locker l(sdata->sdata_lock);
       return sdata->pqueue.empty();
     }
   } op_shardedwq;
