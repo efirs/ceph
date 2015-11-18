@@ -236,13 +236,20 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
     }
   };
 
+#define SBO_SIZE 256
+
   class buffer::raw_malloc : public buffer::raw {
+    char sbo_data[SBO_SIZE];
   public:
     raw_malloc(unsigned l) : raw(l) {
       if (len) {
-	data = (char *)malloc(len);
-        if (!data)
-          throw bad_alloc();
+        if(len <= SBO_SIZE)
+          data = sbo_data;
+        else {
+          data = (char *)malloc(len);
+          if (!data)
+            throw bad_alloc();
+        }
       } else {
 	data = 0;
       }
@@ -255,7 +262,8 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
       bdout << "raw_malloc " << this << " alloc " << (void *)data << " " << l << " " << buffer::get_total_alloc() << bendl;
     }
     ~raw_malloc() {
-      free(data);
+      if(data != sbo_data)
+        free(data);
       dec_total_alloc(len);
       bdout << "raw_malloc " << this << " free " << (void *)data << " " << buffer::get_total_alloc() << bendl;
     }
@@ -528,10 +536,15 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
    * primitive buffer types
    */
   class buffer::raw_char : public buffer::raw {
+      char sbo_data[SBO_SIZE];
   public:
     raw_char(unsigned l) : raw(l) {
-      if (len)
-	data = new char[len];
+      if (len) {
+        if(len <= SBO_SIZE)
+          data = sbo_data;
+        else
+          data = new char[len];
+      }
       else
 	data = 0;
       inc_total_alloc(len);
@@ -543,7 +556,8 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
       bdout << "raw_char " << this << " alloc " << (void *)data << " " << l << " " << buffer::get_total_alloc() << bendl;
     }
     ~raw_char() {
-      delete[] data;
+      if(data != sbo_data)
+        delete[] data;
       dec_total_alloc(len);
       bdout << "raw_char " << this << " free " << (void *)data << " " << buffer::get_total_alloc() << bendl;
     }
@@ -553,10 +567,15 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
   };
 
   class buffer::raw_unshareable : public buffer::raw {
+      char sbo_data[SBO_SIZE];
   public:
     raw_unshareable(unsigned l) : raw(l) {
-      if (len)
-	data = new char[len];
+      if (len) {
+        if(len <= SBO_SIZE)
+          data = sbo_data;
+        else
+          data = new char[len];
+      }
       else
 	data = 0;
     }
@@ -569,7 +588,8 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
       return false; // !shareable, will force make_shareable()
     }
     ~raw_unshareable() {
-      delete[] data;
+      if(data != sbo_data)
+        delete[] data;
     }
   };
 
