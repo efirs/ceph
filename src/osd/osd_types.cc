@@ -838,12 +838,30 @@ int pg_string_state(const std::string& state)
   return type;
 }
 
+template<typename T>
+static inline
+void itoa(T i, int digits, char* buf) {
+  while(i) {
+    *buf-- = "0123456789"[i % 10];
+    i /= 10;
+    digits--;
+  }
+  while(digits--)
+    *buf-- = '0';
+}
+
 // -- eversion_t --
 string eversion_t::get_key_name() const
 {
   char key[40];
-  snprintf(
-    key, sizeof(key), "%010u.%020llu", epoch, (long long unsigned)version);
+
+  //snprintf(
+  //  key, sizeof(key), "%010u.%020llu", epoch, (long long unsigned)version);
+  key[31] = 0;
+  itoa<long long unsigned>((long long unsigned)version, 20, key + 30);
+  key[10] = '.';
+  itoa<unsigned>(epoch, 10, key + 9);
+
   return string(key);
 }
 
