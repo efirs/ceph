@@ -346,7 +346,7 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
   };
 #endif
 
-#ifdef CEPH_HAVE_SPLICE
+#if 0 //CEPH_HAVE_SPLICE
   class buffer::raw_pipe : public buffer::raw {
   public:
     raw_pipe(unsigned len) : raw(len), source_consumed(false) {
@@ -667,6 +667,7 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
     return create_aligned(len, CEPH_PAGE_SIZE);
   }
 
+#if 0
   buffer::raw* buffer::create_zero_copy(unsigned len, int fd, int64_t *offset) {
 #ifdef CEPH_HAVE_SPLICE
     buffer::raw_pipe* buf = new raw_pipe(len);
@@ -680,29 +681,36 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
     throw error_code(-ENOTSUP);
 #endif
   }
+#endif
 
   buffer::raw* buffer::create_unshareable(unsigned len) {
     return new raw_unshareable(len);
   }
 
-  buffer::ptr::ptr(raw *r) : _raw(r), _off(0), _len(r->len)   // no lock needed; this is an unref raw.
+  buffer::ptr::ptr(raw *r) : _raw(r), _start(_raw->data), _end(_start + r->len), _ptr(_start + r->len)   // no lock needed; this is an unref raw.
   {
     r->nref.inc();
-    bdout << "ptr " << this << " get " << _raw << bendl;
+    bdout << "ptr " << this << " get " << _raw << " " << r->len << bendl;
   }
-  buffer::ptr::ptr(unsigned l) : _off(0), _len(l)
+  buffer::ptr::ptr(unsigned l)
   {
     _raw = create(l);
     _raw->nref.inc();
+    _start = _raw->data;
+    _end = _start + l;
+    _ptr = _start + l;
     bdout << "ptr " << this << " get " << _raw << bendl;
   }
-  buffer::ptr::ptr(const char *d, unsigned l) : _off(0), _len(l)    // ditto.
+  buffer::ptr::ptr(const char *d, unsigned l)
   {
     _raw = copy(d, l);
     _raw->nref.inc();
+    _start = _raw->data;
+    _end = _start + l;
+    _ptr = _start + l;
     bdout << "ptr " << this << " get " << _raw << bendl;
   }
-  buffer::ptr::ptr(const ptr& p) : _raw(p._raw), _off(p._off), _len(p._len)
+  buffer::ptr::ptr(const ptr& p) : _raw(p._raw), _start(p._start), _end(p._end), _ptr(p._ptr)
   {
     if (_raw) {
       _raw->nref.inc();
@@ -710,9 +718,9 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
     }
   }
   buffer::ptr::ptr(const ptr& p, unsigned o, unsigned l)
-    : _raw(p._raw), _off(p._off + o), _len(l)
+    : _raw(p._raw), _start(p._start + o), _end(p._end), _ptr(_start + l)
   {
-    assert(o+l <= p._len);
+    assert(o+l <= p.length());
     assert(_raw);
     _raw->nref.inc();
     bdout << "ptr " << this << " get " << _raw << bendl;
@@ -727,10 +735,11 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
     release();
     if (raw) {
       _raw = raw;
-      _off = p._off;
-      _len = p._len;
+      _start = p._start;
+      _end = p._end;
+      _ptr = p._ptr;
     } else {
-      _off = _len = 0;
+      _start = _end = _ptr = 0;
     }
     return *this;
   }
@@ -755,14 +764,22 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
   void buffer::ptr::swap(ptr& other)
   {
     raw *r = _raw;
-    unsigned o = _off;
-    unsigned l = _len;
+
+    char* s = _start;
+    char* e = _end;
+    char* p = _ptr;
+
     _raw = other._raw;
-    _off = other._off;
-    _len = other._len;
+
+    _start = other._start;
+    _end = other._end;
+    _ptr = other._ptr;
+
     other._raw = r;
-    other._off = o;
-    other._len = l;
+
+    other._start = s;
+    other._end = e;
+    other._ptr = p;
   }
 
   void buffer::ptr::release()
@@ -777,40 +794,39 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
     }
   }
 
-  bool buffer::ptr::at_buffer_tail() const { return _off + _len == _raw->len; }
+  void buffer::ptr::set_offset(unsigned o) {
+    // assert(raw_length() >= o);
+    _start = _raw->data + o;
+    assert(_start <= _end);
+  }
 
   const char *buffer::ptr::c_str() const {
     assert(_raw);
-    if (buffer_track_c_str)
+    if (unlikely(buffer_track_c_str))
       buffer_c_str_accesses.inc();
-    return _raw->get_data() + _off;
+    return _start;
   }
   char *buffer::ptr::c_str() {
     assert(_raw);
-    if (buffer_track_c_str)
+    if (unlikely(buffer_track_c_str))
       buffer_c_str_accesses.inc();
-    return _raw->get_data() + _off;
+    return _start;
   }
 
-  unsigned buffer::ptr::unused_tail_length() const
-  {
-    if (_raw)
-      return _raw->len - (_off+_len);
-    else
-      return 0;
-  }
   const char& buffer::ptr::operator[](unsigned n) const
   {
     assert(_raw);
-    assert(n < _len);
-    return _raw->get_data()[_off + n];
+    assert(n < length());
+    return _start[n];
   }
   char& buffer::ptr::operator[](unsigned n)
   {
     assert(_raw);
-    assert(n < _len);
-    return _raw->get_data()[_off + n];
+    assert(n < length());
+    return _start[n];
   }
+
+  char *buffer::ptr::raw_data() const { return _raw ? _raw->data : 0; }
 
   const char *buffer::ptr::raw_c_str() const { assert(_raw); return _raw->data; }
   unsigned buffer::ptr::raw_length() const { assert(_raw); return _raw->len; }
@@ -818,56 +834,36 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
 
   void buffer::ptr::copy_out(unsigned o, unsigned l, char *dest) const {
     assert(_raw);
-    if (o+l > _len)
+    if (unlikely(o+l > length()))
         throw end_of_buffer();
-    char* src =  _raw->data + _off + o;
-    maybe_inline_memcpy(dest, src, l, 8);
+    maybe_inline_memcpy(dest, _start + o, l, 8);
   }
 
   unsigned buffer::ptr::wasted()
   {
     assert(_raw);
-    return _raw->len - _len;
+    return _raw->len - (_ptr - _raw->data);
   }
 
   int buffer::ptr::cmp(const ptr& o) const
   {
-    int l = _len < o._len ? _len : o._len;
+    int _len = length(), o_len = o.length();
+    int l = _len < o_len ? _len : o_len;
     if (l) {
       int r = memcmp(c_str(), o.c_str(), l);
       if (r)
 	return r;
     }
-    if (_len < o._len)
+    if (_len < o_len)
       return -1;
-    if (_len > o._len)
+    if (_len > o_len)
       return 1;
     return 0;
   }
 
   bool buffer::ptr::is_zero() const
   {
-    return mem_is_zero(c_str(), _len);
-  }
-
-  unsigned buffer::ptr::append(char c)
-  {
-    assert(_raw);
-    assert(1 <= unused_tail_length());
-    char* ptr = _raw->data + _off + _len;
-    *ptr = c;
-    _len++;
-    return _len + _off;
-  }
-
-  unsigned buffer::ptr::append(const char *p, unsigned l)
-  {
-    assert(_raw);
-    assert(l <= unused_tail_length());
-    char* c = _raw->data + _off + _len;
-    maybe_inline_memcpy(c, p, l, 32);
-    _len += l;
-    return _len + _off;
+    return mem_is_zero(c_str(), length());
   }
 
   void buffer::ptr::copy_in(unsigned o, unsigned l, const char *src)
@@ -878,12 +874,11 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
   void buffer::ptr::copy_in(unsigned o, unsigned l, const char *src, bool crc_reset)
   {
     assert(_raw);
-    assert(o <= _len);
-    assert(o+l <= _len);
-    char* dest = _raw->data + _off + o;
+    assert(o <= length());
+    assert(o+l <= length());
     if (crc_reset)
         _raw->invalidate_crc();
-    maybe_inline_memcpy(dest, src, l, 64);
+    maybe_inline_memcpy(_start + o, src, l, 64);
   }
 
   void buffer::ptr::zero()
@@ -895,7 +890,7 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
   {
     if (crc_reset)
         _raw->invalidate_crc();
-    memset(c_str(), 0, _len);
+    memset(c_str(), 0, length());
   }
 
   void buffer::ptr::zero(unsigned o, unsigned l)
@@ -905,7 +900,7 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
 
   void buffer::ptr::zero(unsigned o, unsigned l, bool crc_reset)
   {
-    assert(o+l <= _len);
+    assert(o+l <= length());
     if (crc_reset)
         _raw->invalidate_crc();
     memset(c_str()+o, 0, l);

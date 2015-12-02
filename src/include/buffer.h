@@ -162,12 +162,12 @@ namespace buffer CEPH_BUFFER_API {
    */
   class CEPH_BUFFER_API ptr {
     raw *_raw;
-    unsigned _off, _len;
+    char *_start, *_end, *_ptr;
 
     void release();
 
   public:
-    ptr() : _raw(0), _off(0), _len(0) {}
+    ptr() : _raw(0), _start(0), _end(0), _ptr(0) {}
     ptr(raw *r);
     ptr(unsigned l);
     ptr(const char *d, unsigned l);
@@ -185,8 +185,8 @@ namespace buffer CEPH_BUFFER_API {
     ptr& make_shareable();
 
     // misc
-    bool at_buffer_head() const { return _off == 0; }
-    bool at_buffer_tail() const;
+    bool at_buffer_head() const { return raw_data() == _start; }
+    bool at_buffer_tail() const { return _ptr == _end; }
 
     bool is_aligned(unsigned align) const {
       return ((long)c_str() & (align-1)) == 0;
@@ -202,15 +202,17 @@ namespace buffer CEPH_BUFFER_API {
     raw *get_raw() const { return _raw; }
     const char *c_str() const;
     char *c_str();
-    unsigned length() const { return _len; }
-    unsigned offset() const { return _off; }
-    unsigned start() const { return _off; }
-    unsigned end() const { return _off + _len; }
-    unsigned unused_tail_length() const;
+    unsigned length() const { return _ptr - _start; }
+    unsigned offset() const { return _start - raw_data(); }
+    unsigned start() const { return offset(); }
+    unsigned end() const { return _ptr - raw_data(); }
+
+    unsigned unused_tail_length() const { return _end - _ptr; };
     const char& operator[](unsigned n) const;
     char& operator[](unsigned n);
 
     const char *raw_c_str() const;
+    char *raw_data() const;
     unsigned raw_length() const;
     int raw_nref() const;
 
@@ -225,17 +227,19 @@ namespace buffer CEPH_BUFFER_API {
     bool is_zero() const;
 
     // modifiers
-    void set_offset(unsigned o) {
-      assert(raw_length() >= o);
-      _off = o;
-    }
+    void set_offset(unsigned o);
+
     void set_length(unsigned l) {
-      assert(raw_length() >= l);
-      _len = l;
+      _ptr = _start + l;
     }
 
-    unsigned append(char c);
-    unsigned append(const char *p, unsigned l);
+    void append(char c) { *_ptr++ = c; }
+
+    void append(const char *p, unsigned l) {
+      memcpy(_ptr, p, l);
+      _ptr += l;
+    }
+
     void copy_in(unsigned o, unsigned l, const char *src);
     void copy_in(unsigned o, unsigned l, const char *src, bool crc_reset);
     void zero();

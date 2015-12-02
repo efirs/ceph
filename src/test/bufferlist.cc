@@ -186,7 +186,7 @@ TEST(Buffer, constructors) {
       EXPECT_EQ(history_alloc_num, buffer::get_history_alloc_num());
     }
   }
-#ifdef CEPH_HAVE_SPLICE
+#if 0 //CEPH_HAVE_SPLICE
   if (ceph_buffer_track)
     EXPECT_EQ(0, buffer::get_total_alloc());
   {
@@ -225,7 +225,7 @@ TEST(BufferRaw, ostream) {
   EXPECT_GT(stream.str().size(), stream.str().find("len 1 nref 1)"));
 }
 
-#ifdef CEPH_HAVE_SPLICE
+#if 0 // CEPH_HAVE_SPLICE
 class TestRawPipe : public ::testing::Test {
 protected:
   virtual void SetUp() {
