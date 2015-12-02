@@ -458,7 +458,7 @@ public:
   }
 
   // -- superblock --
-  Mutex publish_lock, pre_publish_lock; // pre-publish orders before publish
+  Mutex publish_lock; // pre-publish orders before publish
   OSDSuperblock superblock;
   OSDSuperblock get_superblock() {
     Mutex::Locker l(publish_lock);
@@ -500,54 +500,126 @@ public:
    * working from old maps.
    */
   OSDMapRef next_osdmap;
+  RWLock pre_publish_lock;
+  Mutex pre_publish_mutex;
   Cond pre_publish_cond;
+
   void pre_publish_map(OSDMapRef map) {
-    Mutex::Locker l(pre_publish_lock);
+    RWLock::WLocker l(pre_publish_lock);
     next_osdmap = map;
   }
 
   void activate_map();
+
   /// map epochs reserved below
-  map<epoch_t, unsigned> map_reservations;
+  map<epoch_t, atomic_t> map_reservations;
 
   /// gets ref to next_osdmap and registers the epoch as reserved
-  OSDMapRef get_nextmap_reserved() {
-    Mutex::Locker l(pre_publish_lock);
+  OSDMapRef get_nextmap_reserved()
+  {
+    {
+      RWLock::RLocker l(pre_publish_lock);
+
+      if (!next_osdmap)
+	return OSDMapRef();
+
+      if (get_nextmap_reserved_optimistic())
+	return next_osdmap;
+    }
+
+    RWLock::WLocker l(pre_publish_lock);
+
     if (!next_osdmap)
       return OSDMapRef();
+
     epoch_t e = next_osdmap->get_epoch();
-    map<epoch_t, unsigned>::iterator i =
-      map_reservations.insert(make_pair(e, 0)).first;
-    i->second++;
+
+    map<epoch_t, atomic_t>::iterator i =
+      map_reservations.emplace(std::piecewise_construct,
+	  std::forward_as_tuple(e), std::forward_as_tuple()).first;
+
+    i->second.inc();
+
     return next_osdmap;
   }
+
   /// releases reservation on map
-  void release_map(OSDMapRef osdmap) {
-    Mutex::Locker l(pre_publish_lock);
-    map<epoch_t, unsigned>::iterator i =
-      map_reservations.find(osdmap->get_epoch());
-    assert(i != map_reservations.end());
-    assert(i->second > 0);
-    if (--(i->second) == 0) {
-      map_reservations.erase(i);
-    }
-    pre_publish_cond.Signal();
+  void release_map(OSDMapRef osdmap)
+  {
+    if (release_map_optimistic(osdmap))
+      return;
+
+    Mutex::Locker m(pre_publish_mutex);
+
+    if (release_map_pessimistic(osdmap))
+      pre_publish_cond.Signal();
   }
+
   /// blocks until there are no reserved maps prior to next_osdmap
-  void await_reserved_maps() {
-    Mutex::Locker l(pre_publish_lock);
+  void await_reserved_maps()
+  {
     assert(next_osdmap);
-    while (true) {
-      map<epoch_t, unsigned>::iterator i = map_reservations.begin();
-      if (i == map_reservations.end() || i->first >= next_osdmap->get_epoch()) {
-	break;
-      } else {
-	pre_publish_cond.Wait(pre_publish_lock);
-      }
+
+    while (!await_reserved_maps_optimistic())
+    {
+      Mutex::Locker m(pre_publish_mutex);
+
+      if (!await_reserved_maps_optimistic())
+	pre_publish_cond.Wait(pre_publish_mutex);
     }
   }
 
 private:
+  bool get_nextmap_reserved_optimistic()
+  {
+    map<epoch_t, atomic_t>::iterator i =
+      map_reservations.find(next_osdmap->get_epoch());
+
+    if(i == map_reservations.end())
+      return false;
+
+    i->second.inc();
+
+    return true;
+  }
+
+  bool release_map_optimistic(OSDMapRef& osdmap)
+  {
+    RWLock::RLocker l(pre_publish_lock);
+
+    map<epoch_t, atomic_t>::iterator i =
+      map_reservations.find(osdmap->get_epoch());
+
+    assert(i != map_reservations.end());
+    assert(i->second.read() > 0);
+
+    return i->second.dec() != 0;
+  }
+
+  bool release_map_pessimistic(OSDMapRef& osdmap)
+  {
+      RWLock::WLocker l(pre_publish_lock);
+
+      map<epoch_t, atomic_t>::iterator i =
+	map_reservations.find(osdmap->get_epoch());
+
+      if (i == map_reservations.end() || i->second.read() != 0)
+	return false;
+
+      map_reservations.erase(i);
+
+      return true;
+  }
+
+  bool await_reserved_maps_optimistic()
+  {
+    RWLock::RLocker l(pre_publish_lock);
+
+    map<epoch_t, atomic_t>::iterator i = map_reservations.begin();
+
+    return i == map_reservations.end() || i->first >= next_osdmap->get_epoch();
+  }
+
   Mutex peer_map_epoch_lock;
   map<int, epoch_t> peer_map_epoch;
 public:
