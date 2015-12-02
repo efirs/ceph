@@ -275,6 +275,8 @@ private:
     vector<string> *path   ///< [out] Path components for hoid.
     );
 
+  void get_path_components_fast(const ghobject_t &oid, char* buf, int maxlen);
+
   /// Pre-hash and split folders to avoid runtime splitting
   /// according to the given expected object number.
   int pre_split_folder(uint32_t pg_num, uint64_t expected_num_objs);

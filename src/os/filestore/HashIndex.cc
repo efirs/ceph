@@ -362,9 +362,11 @@ int HashIndex::_lookup(const ghobject_t &oid,
 		       vector<string> *path,
 		       string *mangled_name,
 		       int *hardlink) {
-  vector<string> path_comp;
-  get_path_components(oid, &path_comp);
-  vector<string>::iterator next = path_comp.begin();
+  int i = 0;
+  char buf[MAX_HASH_LEVEL + 1];
+
+  get_path_components_fast(oid, buf, MAX_HASH_LEVEL);
+
   int exists;
   while (1) {
     int r = path_exists(*path, &exists);
@@ -376,9 +378,9 @@ int HashIndex::_lookup(const ghobject_t &oid,
       path->pop_back();
       break;
     }
-    if (next == path_comp.end())
+    if (i == MAX_HASH_LEVEL)
       break;
-    path->push_back(*(next++));
+    path->push_back(string(buf + i, 1));
   }
   return get_mangled_name(*path, oid, mangled_name, hardlink);
 }
@@ -798,14 +800,28 @@ void HashIndex::get_path_components(const ghobject_t &oid,
   }
 }
 
-string HashIndex::get_hash_str(uint32_t hash) {
-  char buf[MAX_HASH_LEVEL + 1];
-  snprintf(buf, sizeof(buf), "%.*X", MAX_HASH_LEVEL, hash);
-  string retval;
-  for (int i = 0; i < MAX_HASH_LEVEL; ++i) {
-    retval.push_back(buf[MAX_HASH_LEVEL - 1 - i]);
+static const char hext[] = "0123456789ABCDEF";
+
+void HashIndex::get_path_components_fast(const ghobject_t &oid, char* buf, int maxlen) {
+  uint32_t v = (uint32_t)oid.hobj.get_nibblewise_key();
+  assert(maxlen);
+  while(maxlen--) {
+    buf[maxlen] = hext[v & 0xF];
+    v >>= 4;
   }
-  return retval;
+}
+
+string HashIndex::get_hash_str(uint32_t hash) {
+  char buf[MAX_HASH_LEVEL + 1], *p = buf;
+  int maxlen = MAX_HASH_LEVEL;
+
+  while(maxlen--) {
+    *p++ = hext[hash & 0xF];
+    hash >>= 4;
+  }
+  *p = 0;
+
+  return string(buf);
 }
 
 string HashIndex::get_path_str(const ghobject_t &oid) {
