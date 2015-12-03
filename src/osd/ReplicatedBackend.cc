@@ -1057,12 +1057,16 @@ void ReplicatedBackend::issue_op(
 {
 
   if (parent->get_actingbackfill_shards().size() > 1) {
+#if 0
     ostringstream ss;
     set<pg_shard_t> replicas = parent->get_actingbackfill_shards();
     replicas.erase(parent->whoami_shard());
     ss << "waiting for subops from " << replicas;
     if (op->op)
       op->op->mark_sub_op_sent(ss.str());
+#endif
+    if (op->op)
+      op->op->mark_sub_op_sent("waiting for subops from replicas");
   }
   for (set<pg_shard_t>::const_iterator i =
 	 parent->get_actingbackfill_shards().begin();

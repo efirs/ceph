@@ -154,7 +154,7 @@ protected:
   utime_t initiated_at;
   list<pair<utime_t, string> > events; /// list of events and their times
   mutable Mutex lock; /// to protect the events list
-  string current; /// the current state the event is in
+  const char* current; /// the current state the event is in
   uint64_t seq; /// a unique value set by the OpTracker
 
   uint32_t warn_interval_multiplier; // limits output of a given op warning
@@ -164,6 +164,7 @@ protected:
     tracker(_tracker),
     initiated_at(initiated),
     lock("TrackedOp::lock"),
+    current(NULL),
     seq(0),
     warn_interval_multiplier(1),
     is_tracked(false)
