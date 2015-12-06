@@ -45,6 +45,8 @@
 #include <exception>
 #include <type_traits>
 
+#include "common/likely.h"
+
 #include "page.h"
 #include "crc32c.h"
 #include "buffer_fwd.h"
@@ -259,9 +261,9 @@ namespace buffer CEPH_BUFFER_API {
   class CEPH_BUFFER_API list {
     // my private bits
     ptrlist _buffers;
+    ptr* _back;
     unsigned _len;
     unsigned _memcopy_count; //the total of memcopy using rebuild().
-    ptr append_buffer;  // where i put small appends.
 
     template <bool is_const>
     class iterator_impl: public std::iterator<std::forward_iterator_tag, char> {
@@ -300,12 +302,26 @@ namespace buffer CEPH_BUFFER_API {
 
       /// true if iterator is at the end of the buffer::list
       bool end() const {
+	if(!p->length())
+	  return true;
 	return p == ls->end();
 	//return off == bl->length();
       }
 
       void advance(int o);
       void seek(unsigned o);
+
+      void advance_fast(unsigned o) {
+	if (unlikely(p == ls->end()))
+	  throw end_of_buffer();
+	if(likely(p_off + o < p->length())) {
+	  p_off += o;
+	  off += o;
+	}
+	else
+	  advance(o);
+      }
+
       bool operator!=(const iterator_impl& rhs) const;
       char operator*() const;
       iterator_impl& operator++();
@@ -315,7 +331,23 @@ namespace buffer CEPH_BUFFER_API {
 
       // copy data out.
       // note that these all _append_ to dest!
-      void copy(unsigned len, char *dest);
+      void copy_slow(unsigned len, char *dest);
+      void copy(unsigned len, char *dest) {
+	if (unlikely(p == ls->end())) {
+	  seek(off);
+	  if (unlikely(p == ls->end()))
+	    throw end_of_buffer();
+	}
+	//assert(p->length() > 0);
+
+	if(likely(len < p->length() - p_off)) {
+	  p->copy_out(p_off, len, dest);
+	  advance_fast(len);
+	}
+	else
+	  copy_slow(len, dest);
+      }
+
       void copy(unsigned len, ptr &dest);
       void copy(unsigned len, list &dest);
       void copy(unsigned len, std::string &dest);
@@ -333,14 +365,15 @@ namespace buffer CEPH_BUFFER_API {
       iterator(bl_t *l, unsigned o, list_iter_t ip, unsigned po) :
 	iterator_impl(l, o, ip, po) {}
 
-      void advance(int o);
-      void seek(unsigned o);
+      void advance(int o) { iterator_impl<false>::advance(o); }
+      void seek(unsigned o) { iterator_impl<false>::seek(o); }
+
       char operator*();
       iterator& operator++();
       ptr get_current_ptr();
 
       // copy data out
-      void copy(unsigned len, char *dest);
+      void copy(unsigned len, char *dest) { return iterator_impl<false>::copy(len, dest); }
       void copy(unsigned len, ptr &dest);
       void copy(unsigned len, list &dest);
       void copy(unsigned len, std::string &dest);
@@ -356,12 +389,15 @@ namespace buffer CEPH_BUFFER_API {
     mutable iterator last_p;
     int zero_copy_to_fd(int fd) const;
 
+    void cache_back() { _back = &_buffers.back(); }
+
   public:
     // cons/des
-    list() : _len(0), _memcopy_count(0), last_p(this) {}
+    list() : _back(NULL), _len(0), _memcopy_count(0), last_p(this) {}
     list(unsigned prealloc) : _len(0), _memcopy_count(0), last_p(this) {
-      append_buffer = buffer::create(prealloc);
-      append_buffer.set_length(0);   // unused, so far.
+      _buffers.emplace_back(buffer::create(prealloc));
+      cache_back();
+      _back->set_length(0);   // unused, so far.
     }
 
     list(const list& other) : _buffers(other._buffers), _len(other._len),
@@ -372,6 +408,8 @@ namespace buffer CEPH_BUFFER_API {
     list& operator= (const list& other) {
       if (this != &other) {
         _buffers = other._buffers;
+	cache_back();
+
         _len = other._len;
 	make_shareable();
       }
@@ -411,6 +449,8 @@ namespace buffer CEPH_BUFFER_API {
       _buffers.clear();
       _len = 0;
       _memcopy_count = 0;
+      _back = NULL;
+
       last_p = begin();
     }
     void push_front(ptr& bp) {
@@ -418,6 +458,7 @@ namespace buffer CEPH_BUFFER_API {
 	return;
       _buffers.push_front(bp);
       _len += bp.length();
+      cache_back();
     }
     void push_front(raw *r) {
       ptr bp(r);
@@ -426,8 +467,11 @@ namespace buffer CEPH_BUFFER_API {
     void push_back(const ptr& bp) {
       if (bp.length() == 0)
 	return;
+
       _buffers.push_back(bp);
       _len += bp.length();
+
+      cache_back();
     }
     void push_back(raw *r) {
       ptr bp(r);
@@ -473,12 +517,8 @@ namespace buffer CEPH_BUFFER_API {
       }
     }
 
-    iterator begin() {
-      return iterator(this, 0);
-    }
-    iterator end() {
-      return iterator(this, _len, _buffers.end(), 0);
-    }
+    iterator begin() { return iterator(this, 0); }
+    iterator end() { return iterator(this, _len, _buffers.end(), 0); }
 
     const_iterator begin() const {
       return const_iterator(this, 0);
@@ -496,8 +536,19 @@ namespace buffer CEPH_BUFFER_API {
     void copy_in(unsigned off, unsigned len, const char *src, bool crc_reset);
     void copy_in(unsigned off, unsigned len, const list& src);
 
-    void append(char c);
-    void append(const char *data, unsigned len);
+    void append(char c)
+    {
+      if(unlikely(!_back || !_back->unused_tail_length())) {
+	_buffers.emplace_back(create_aligned(CEPH_BUFFER_APPEND_SIZE, CEPH_BUFFER_APPEND_SIZE));
+	cache_back();
+	_back->set_length(0);
+      }
+
+      _back->append(c);
+      _len++;
+    }
+
+    void append_slow(const char *data, unsigned len);
     void append(const std::string& s) {
       append(s.data(), s.length());
     }
@@ -506,7 +557,18 @@ namespace buffer CEPH_BUFFER_API {
     void append(const list& bl);
     void append(std::istream& in);
     void append_zero(unsigned len);
-    
+
+    void append(const char *data, unsigned len)
+    {
+      if(likely(_back && len < _back->unused_tail_length())) {
+	_back->append(data, len);
+	_len += len;
+	return;
+      }
+
+      append_slow(data, len);
+    }
+
     /*
      * get a char
      */

@@ -1011,7 +1011,7 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
   // copy data out.
   // note that these all _append_ to dest!
   template<bool is_const>
-  void buffer::list::iterator_impl<is_const>::copy(unsigned len, char *dest)
+  void buffer::list::iterator_impl<is_const>::copy_slow(unsigned len, char *dest)
   {
     if (p == ls->end()) seek(off);
     while (len > 0) {
@@ -1099,16 +1099,6 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
   template class buffer::list::iterator_impl<true>;
   template class buffer::list::iterator_impl<false>;
 
-  void buffer::list::iterator::advance(int o)
-  {
-    buffer::list::iterator_impl<false>::advance(o);
-  }
-
-  void buffer::list::iterator::seek(unsigned o)
-  {
-    buffer::list::iterator_impl<false>::seek(o);
-  }
-
   char buffer::list::iterator::operator*()
   {
     if (p == ls->end()) {
@@ -1129,11 +1119,6 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
       throw end_of_buffer();
     }
     return ptr(*p, p_off, p->length() - p_off);
-  }
-
-  void buffer::list::iterator::copy(unsigned len, char *dest)
-  {
-    return buffer::list::iterator_impl<false>::copy(len, dest);
   }
 
   void buffer::list::iterator::copy(unsigned len, ptr &dest)
@@ -1202,13 +1187,11 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
 
 
   // -- buffer::list --
-
   buffer::list::list(list&& other)
     : _buffers(std::move(other._buffers)),
       _len(other._len),
       _memcopy_count(other._memcopy_count),
       last_p(this) {
-    append_buffer.swap(other.append_buffer);
     other.clear();
   }
 
@@ -1217,8 +1200,9 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
     std::swap(_len, other._len);
     std::swap(_memcopy_count, other._memcopy_count);
     _buffers.swap(other._buffers);
-    append_buffer.swap(other.append_buffer);
     //last_p.swap(other.last_p);
+    cache_back();
+    other.cache_back();
     last_p = begin();
     other.last_p = other.begin();
   }
@@ -1373,6 +1357,7 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
   {
     if (_len == 0) {
       _buffers.clear();
+      _back = NULL;
       return;
     }
     ptr nb;
@@ -1394,8 +1379,11 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
     }
     _memcopy_count += pos;
     _buffers.clear();
-    if (nb.length())
+    _back = NULL;
+    if (nb.length()) {
       _buffers.push_back(nb);
+      cache_back();
+    }
     invalidate_crc();
     last_p = begin();
   }
@@ -1444,6 +1432,7 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
         _memcopy_count += unaligned._len;
       }
       _buffers.insert(p, unaligned._buffers.front());
+      cache_back(); //TODO: check _buffers not empty
     }
     last_p = begin();
   }
@@ -1468,8 +1457,8 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
     if (!(flags & CLAIM_ALLOW_NONSHAREABLE))
       bl.make_shareable();
     _buffers.splice(_buffers.end(), bl._buffers );
-    bl._len = 0;
-    bl.last_p = bl.begin();
+    cache_back();
+    bl.clear();
   }
 
   void buffer::list::claim_prepend(list& bl, unsigned int flags)
@@ -1479,8 +1468,9 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
     if (!(flags & CLAIM_ALLOW_NONSHAREABLE))
       bl.make_shareable();
     _buffers.splice(_buffers.begin(), bl._buffers );
-    bl._len = 0;
-    bl.last_p = bl.begin();
+    assert(bl._len);
+    cache_back();
+    bl.clear();
   }
 
   void buffer::list::copy(unsigned off, unsigned len, char *dest) const
@@ -1515,9 +1505,15 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
 
   void buffer::list::copy_in(unsigned off, unsigned len, const char *src, bool crc_reset)
   {
-    if (off + len > length())
+    //only one buffer in the bufferlist
+    if(_back && &_buffers.front() == _back) {
+      _back->copy_in(off, len, src, crc_reset);
+      return;
+    }
+
+    if (unlikely(off + len > length()))
       throw end_of_buffer();
-    
+
     if (last_p.get_off() != off) 
       last_p.seek(off);
     last_p.copy_in(len, src, crc_reset);
@@ -1525,44 +1521,34 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
 
   void buffer::list::copy_in(unsigned off, unsigned len, const list& src)
   {
-    if (last_p.get_off() != off) 
+    if (last_p.get_off() != off)
       last_p.seek(off);
     last_p.copy_in(len, src);
   }
 
-  void buffer::list::append(char c)
+  void buffer::list::append_slow(const char *data, unsigned len)
   {
-    // put what we can into the existing append_buffer.
-    unsigned gap = append_buffer.unused_tail_length();
-    if (!gap) {
-      // make a new append_buffer!
-      append_buffer = create_aligned(CEPH_BUFFER_APPEND_SIZE, CEPH_BUFFER_APPEND_SIZE);
-      append_buffer.set_length(0);   // unused, so far.
-    }
-    append(append_buffer, append_buffer.append(c) - 1, 1);	// add segment to the list
-  }
-
-  void buffer::list::append(const char *data, unsigned len)
-  {
-    while (len > 0) {
-      // put what we can into the existing append_buffer.
-      unsigned gap = append_buffer.unused_tail_length();
-      if (gap > 0) {
-        if (gap > len) gap = len;
-    //cout << "append first char is " << data[0] << ", last char is " << data[len-1] << std::endl;
-        append_buffer.append(data, gap);
-        append(append_buffer, append_buffer.end() - gap, gap);	// add segment to the list
-        len -= gap;
-        data += gap;
+    do {
+      if(_back) {
+	unsigned gap = _back->unused_tail_length();
+	if (gap > 0) {
+	  if (gap > len) gap = len;
+	  _back->append(data, gap);
+	  len -= gap;
+	  data += gap;
+	  _len += gap;
+	}
       }
+
       if (len == 0)
-        break;  // done!
-      
-      // make a new append_buffer!
+        break;
+
       unsigned alen = CEPH_BUFFER_APPEND_SIZE * (((len-1) / CEPH_BUFFER_APPEND_SIZE) + 1);
-      append_buffer = create_aligned(alen, CEPH_BUFFER_APPEND_SIZE);
-      append_buffer.set_length(0);   // unused, so far.
-    }
+
+      _buffers.emplace_back(create_aligned(alen, CEPH_BUFFER_APPEND_SIZE));
+      cache_back();
+      _back->set_length(0);
+    } while (true);
   }
 
   void buffer::list::append(const ptr& bp)
@@ -1595,7 +1581,9 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
     for (ptrlist::const_iterator p = bl._buffers.begin();
 	 p != bl._buffers.end();
 	 ++p) 
-      _buffers.push_back(*p);
+      if(p->length())
+	_buffers.push_back(*p);
+    cache_back();
   }
 
   void buffer::list::append(std::istream& in)
@@ -1687,6 +1675,7 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
 
       tmp.rebuild();
       _buffers.insert(curbuf, tmp._buffers.front());
+      cache_back();
       return tmp.c_str() + off;
     }
 
@@ -1731,6 +1720,7 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
       off = 0;
       ++curbuf;
     }
+    cache_back();
   }
 
   // funky modifer
@@ -1796,6 +1786,7 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
     // splice in *replace (implement me later?)
     
     last_p = begin();  // just in case we were in the removed region.
+    cache_back();
   }
 
   void buffer::list::write(int off, int len, std::ostream& out) const
@@ -1880,12 +1871,14 @@ int buffer::list::read_file(const char *fn, std::string *error)
 
 ssize_t buffer::list::read_fd(int fd, size_t len)
 {
+#if 0
   // try zero copy first
   if (false && read_fd_zero_copy(fd, len) == 0) {
     // TODO fix callers to not require correct read size, which is not
     // available for raw_pipe until we actually inspect the data
     return 0;
   }
+#endif
   int s = ROUND_UP_TO(len, CEPH_BUFFER_APPEND_SIZE);
   bufferptr bp = buffer::create_aligned(s, CEPH_BUFFER_APPEND_SIZE);
   ssize_t ret = safe_read(fd, (void*)bp.c_str(), len);
@@ -1896,6 +1889,7 @@ ssize_t buffer::list::read_fd(int fd, size_t len)
   return ret;
 }
 
+#if 0
 int buffer::list::read_fd_zero_copy(int fd, size_t len)
 {
 #ifdef CEPH_HAVE_SPLICE
@@ -1912,6 +1906,7 @@ int buffer::list::read_fd_zero_copy(int fd, size_t len)
   return -ENOTSUP;
 #endif
 }
+#endif
 
 int buffer::list::write_file(const char *fn, int mode)
 {
