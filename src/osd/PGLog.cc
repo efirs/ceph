@@ -738,7 +738,7 @@ void PGLog::check() {
 
 void PGLog::write_log(
   ObjectStore::Transaction& t,
-  map<string,bufferlist> *km,
+  ceph_map<string,bufferlist> *km,
   const coll_t& coll, const ghobject_t &log_oid,
   bool require_rollback)
 {
@@ -770,7 +770,7 @@ void PGLog::write_log(
 
 void PGLog::write_log(
     ObjectStore::Transaction& t,
-    map<string,bufferlist> *km,
+    ceph_map<string,bufferlist> *km,
     pg_log_t &log,
     const coll_t& coll, const ghobject_t &log_oid,
     map<eversion_t, hobject_t> &divergent_priors,
@@ -785,7 +785,7 @@ void PGLog::write_log(
 
 void PGLog::_write_log(
   ObjectStore::Transaction& t,
-  map<string,bufferlist> *km,
+  ceph_map<string,bufferlist> *km,
   pg_log_t &log,
   const coll_t& coll, const ghobject_t &log_oid,
   map<eversion_t, hobject_t> &divergent_priors,

@@ -18,6 +18,8 @@
 
 #include "include/memory.h"
 
+#include "common/stlallocator.h"
+
 #include "byteorder.h"
 #include "buffer.h"
 #include "assert.h"
@@ -400,6 +402,42 @@ inline void decode(std::list<T>& ls, bufferlist::iterator& p)
   }
 }
 
+// ceph_list
+template<class T>
+inline void encode(const ceph_list<T>& ls, bufferlist& bl)
+{
+  // should i pre- or post- count?
+  if (!ls.empty()) {
+    unsigned pos = bl.length();
+    unsigned n = 0;
+    encode(n, bl);
+    for (typename ceph_list<T>::const_iterator p = ls.begin(); p != ls.end(); ++p) {
+      n++;
+      encode(*p, bl);
+    }
+    ceph_le32 en;
+    en = n;
+    bl.copy_in(pos, sizeof(en), (char*)&en);
+  } else {
+    __u32 n = (__u32)(ls.size());    // FIXME: this is slow on a list.
+    encode(n, bl);
+    for (typename ceph_list<T>::const_iterator p = ls.begin(); p != ls.end(); ++p)
+      encode(*p, bl);
+  }
+}
+template<class T>
+inline void decode(ceph_list<T>& ls, bufferlist::iterator& p)
+{
+  __u32 n;
+  decode(n, p);
+  ls.clear();
+  while (n--) {
+    T v;
+    decode(v, p);
+    ls.push_back(v);
+  }
+}
+
 template<class T>
 inline void encode(const std::list<ceph::shared_ptr<T> >& ls, bufferlist& bl)
 {
@@ -636,12 +674,35 @@ inline void encode(const std::map<T,U>& m, bufferlist& bl)
     encode(p->second, bl);
   }
 }
+
+template<class T, class U>
+inline void encode(const ceph_map<T,U>& m, bufferlist& bl)
+{
+  __u32 n = (__u32)(m.size());
+  encode(n, bl);
+  for (typename ceph_map<T,U>::const_iterator p = m.begin(); p != m.end(); ++p) {
+    encode(p->first, bl);
+    encode(p->second, bl);
+  }
+}
+
 template<class T, class U, class C>
 inline void encode(const std::map<T,U,C>& m, bufferlist& bl)
 {
   __u32 n = (__u32)(m.size());
   encode(n, bl);
   for (typename std::map<T,U,C>::const_iterator p = m.begin(); p != m.end(); ++p) {
+    encode(p->first, bl);
+    encode(p->second, bl);
+  }
+}
+
+template<class T, class U, class C>
+inline void encode(const ceph_map<T,U,C>& m, bufferlist& bl)
+{
+  __u32 n = (__u32)(m.size());
+  encode(n, bl);
+  for (typename ceph_map<T,U,C>::const_iterator p = m.begin(); p != m.end(); ++p) {
     encode(p->first, bl);
     encode(p->second, bl);
   }
@@ -670,6 +731,18 @@ inline void decode(std::map<T,U>& m, bufferlist::iterator& p)
 }
 template<class T, class U, class C>
 inline void decode(std::map<T,U,C>& m, bufferlist::iterator& p)
+{
+  __u32 n;
+  decode(n, p);
+  m.clear();
+  while (n--) {
+    T k;
+    decode(k, p);
+    decode(m[k], p);
+  }
+}
+template<class T, class U, class C>
+inline void decode(ceph_map<T,U,C>& m, bufferlist::iterator& p)
 {
   __u32 n;
   decode(n, p);
