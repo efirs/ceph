@@ -637,6 +637,8 @@ OPTION(osd_recover_clone_overlap, OPT_BOOL, true)   // preserve clone_overlap du
 OPTION(osd_op_num_threads_per_shard, OPT_INT, 2)
 OPTION(osd_op_num_shards, OPT_INT, 5)
 
+OPTION(osd_thread_per_connection, OPT_BOOL, false)   // bypass thread pool
+
 // Set to true for testing.  Users should NOT set this.
 // If set to true even after reading enough shards to
 // decode the object, any error will be reported.

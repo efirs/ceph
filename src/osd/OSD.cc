@@ -8347,7 +8347,70 @@ void OSD::ShardedOpWQ::_process(uint32_t thread_index, heartbeat_handle_d *hb ) 
   (item.first)->unlock();
 }
 
+
+void OSD::ShardedOpWQ::_process_low(pair<PGRef, PGQueueable>& item, heartbeat_handle_d *hb) {
+
+  ThreadPool::TPHandle tp_handle(osd->cct, hb, timeout_interval, 
+    suicide_interval);
+
+//  osd->cct->get_heartbeat_map()->reset_timeout(hb, timeout_interval, suicide_interval);
+
+  (item.first)->lock_suspend_timeout(tp_handle);
+
+  // osd:opwq_process marks the point at which an operation has been dequeued
+  // and will begin to be handled by a worker thread.
+  {
+#ifdef WITH_LTTNG
+    osd_reqid_t reqid;
+    if (boost::optional<OpRequestRef> _op = op->maybe_get_op()) {
+      reqid = (*_op)->get_reqid();
+    }
+#endif
+    tracepoint(osd, opwq_process_start, reqid.name._type,
+        reqid.name._num, reqid.tid, reqid.inc);
+  }
+
+#if 0
+  lgeneric_subdout(osd->cct, osd, 30) << "dequeue status: ";
+  Formatter *f = Formatter::create("json");
+  f->open_object_section("q");
+  dump(f);
+  f->close_section();
+  f->flush(*_dout);
+  delete f;
+  *_dout << dendl;
+#endif
+
+  item.second.run(osd, item.first, tp_handle);
+
+  {
+#ifdef WITH_LTTNG
+    osd_reqid_t reqid;
+    if (boost::optional<OpRequestRef> _op = op->maybe_get_op()) {
+      reqid = (*_op)->get_reqid();
+    }
+#endif
+    tracepoint(osd, opwq_process_finish, reqid.name._type,
+        reqid.name._num, reqid.tid, reqid.inc);
+  }
+
+  (item.first)->unlock();
+}
+
 void OSD::ShardedOpWQ::_enqueue(pair<PGRef, PGQueueable> item) {
+
+  if(osd->cct->_conf->osd_thread_per_connection) {
+    static __thread heartbeat_handle_d *hb = NULL;
+    if(!hb) {
+      std::stringstream ss;
+      ss << "ShardedOPWQ" << " thread " << (void*)pthread_self();
+      hb = osd->cct->get_heartbeat_map()->add_worker(ss.str());
+      osd->cct->get_heartbeat_map()->reset_timeout(hb, timeout_interval, 0);
+    }
+
+    _process_low(item, hb);
+    return;
+  }
 
   uint32_t shard_index = (((item.first)->get_pgid().ps())% shard_list.size());
 

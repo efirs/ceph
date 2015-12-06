@@ -1729,6 +1729,7 @@ private:
     }
 
     void _process(uint32_t thread_index, heartbeat_handle_d *hb);
+    void _process_low(pair<PGRef, PGQueueable>& item, heartbeat_handle_d *hb);
     void _enqueue(pair <PGRef, PGQueueable> item);
     void _enqueue_front(pair <PGRef, PGQueueable> item);
       
