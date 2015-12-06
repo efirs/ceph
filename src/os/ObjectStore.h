@@ -447,8 +447,8 @@ public:
     bool use_tbl;   //use_tbl for encode/decode
     bufferlist tbl;
 
-    map<coll_t, __le32> coll_index;
-    map<ghobject_t, __le32, ghobject_t::BitwiseComparator> object_index;
+    ceph_map<coll_t, __le32> coll_index;
+    ceph_map<ghobject_t, __le32, ghobject_t::BitwiseComparator> object_index;
 
     __le32 coll_id;
     __le32 object_id;
@@ -458,9 +458,9 @@ public:
 
     bufferptr op_ptr;
 
-    list<Context *> on_applied;
-    list<Context *> on_commit;
-    list<Context *> on_applied_sync;
+    ceph_list<Context *> on_applied;
+    ceph_list<Context *> on_commit;
+    ceph_list<Context *> on_applied_sync;
 
   public:
 
@@ -496,9 +496,9 @@ public:
       for (list<Transaction *>::iterator i = t.begin();
 	   i != t.end();
 	   ++i) {
-	on_applied.splice(on_applied.end(), (*i)->on_applied);
-	on_commit.splice(on_commit.end(), (*i)->on_commit);
-	on_applied_sync.splice(on_applied_sync.end(), (*i)->on_applied_sync);
+	on_applied.insert(on_applied.end(), (*i)->on_applied.begin(), (*i)->on_applied.end());
+	on_commit.insert(on_commit.end(), (*i)->on_commit.begin(), (*i)->on_commit.end());
+	on_applied_sync.insert(on_applied_sync.end(), (*i)->on_applied_sync.begin(), (*i)->on_applied_sync.end());
       }
       *out_on_applied = C_Contexts::list_to_context(on_applied);
       *out_on_commit = C_Contexts::list_to_context(on_commit);
