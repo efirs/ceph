@@ -911,14 +911,13 @@ inline void decode(std::deque<T>& ls, bufferlist::iterator& p)
   __u8 struct_v = v, struct_compat = compat;		     \
   ::encode(struct_v, (bl));				     \
   ::encode(struct_compat, (bl));			     \
-  buffer::list::iterator struct_compat_it = (bl).end();	     \
-  struct_compat_it.advance(-1);				     \
+  unsigned __lcompat = (bl).length() - 1;  		     \
   ceph_le32 struct_len;				             \
   struct_len = 0;                                            \
   ::encode(struct_len, (bl));				     \
-  buffer::list::iterator struct_len_it = (bl).end();	     \
-  struct_len_it.advance(-4);				     \
+  unsigned __lstruct = (bl).length();  		     \
   do {
+
 
 /**
  * finish encoding block
@@ -928,11 +927,11 @@ inline void decode(std::deque<T>& ls, bufferlist::iterator& p)
  */
 #define ENCODE_FINISH_NEW_COMPAT(bl, new_struct_compat)			\
   } while (false);							\
-  struct_len = (bl).length() - struct_len_it.get_off() - sizeof(struct_len); \
-  struct_len_it.copy_in(4, (char *)&struct_len);			\
+  struct_len = (bl).length() - __lstruct; \
+  (bl).copy_in(__lstruct - 4, 4, (char *)&struct_len);			\
   if (new_struct_compat) {						\
     struct_compat = new_struct_compat;					\
-    struct_compat_it.copy_in(1, (char *)&struct_compat);		\
+    (bl).copy_in(__lcompat, 1, (char *)&struct_compat);			\
   }
 
 #define ENCODE_FINISH(bl) ENCODE_FINISH_NEW_COMPAT(bl, 0)
