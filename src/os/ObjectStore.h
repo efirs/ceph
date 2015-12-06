@@ -1426,6 +1426,27 @@ public:
       data.ops++;
     }
 
+    void omap_setkeys(
+      coll_t cid,                           ///< [in] Collection containing oid
+      const ghobject_t &oid,                ///< [in] Object to update
+      const ceph_map<string, bufferlist> &attrset ///< [in] Replacement keys and values
+      ) {
+      if (use_tbl) {
+        __u32 op = OP_OMAP_SETKEYS;
+        ::encode(op, tbl);
+        ::encode(cid, tbl);
+        ::encode(oid, tbl);
+        ::encode(attrset, tbl);
+      } else {
+        Op* _op = _get_next_op();
+        _op->op = OP_OMAP_SETKEYS;
+        _op->cid = _get_coll_id(cid);
+        _op->oid = _get_object_id(oid);
+        ::encode(attrset, data_bl);
+      }
+      data.ops++;
+    }
+
     /// Set keys on an oid omap (bufferlist variant).
     void omap_setkeys(
       coll_t cid,                           ///< [in] Collection containing oid

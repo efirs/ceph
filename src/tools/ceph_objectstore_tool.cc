@@ -495,7 +495,7 @@ int write_info(ObjectStore::Transaction &t, epoch_t epoch, pg_info_t &info,
   //Empty for this
   coll_t coll(info.pgid);
   ghobject_t pgmeta_oid(info.pgid.make_pgmeta_oid());
-  map<string,bufferlist> km;
+  ceph_map<string,bufferlist> km;
   int ret = PG::_prepare_write_info(
     &km, epoch,
     info, coll,
@@ -515,7 +515,7 @@ int write_pg(ObjectStore::Transaction &t, epoch_t epoch, pg_info_t &info,
   if (ret)
     return ret;
   coll_t coll(info.pgid);
-  map<string,bufferlist> km;
+  ceph_map<string,bufferlist> km;
   PGLog::write_log(t, &km, log, coll, info.pgid.make_pgmeta_oid(), divergent_priors, true);
   t.omap_setkeys(coll, info.pgid.make_pgmeta_oid(), km);
   return 0;

@@ -645,14 +645,14 @@ public:
 		 bool &dirty_info, bool &dirty_big_info);
 
   void write_log(ObjectStore::Transaction& t,
-		 map<string,bufferlist> *km,
+		 ceph_map<string,bufferlist> *km,
 		 const coll_t& coll,
 		 const ghobject_t &log_oid,
 		 bool require_rollback);
 
   static void write_log(
     ObjectStore::Transaction& t,
-    map<string,bufferlist>* km,
+    ceph_map<string,bufferlist>* km,
     pg_log_t &log,
     const coll_t& coll,
     const ghobject_t &log_oid, map<eversion_t, hobject_t> &divergent_priors,
@@ -660,7 +660,7 @@ public:
 
   static void _write_log(
     ObjectStore::Transaction& t,
-    map<string,bufferlist>* km,
+    ceph_map<string,bufferlist>* km,
     pg_log_t &log,
     const coll_t& coll, const ghobject_t &log_oid,
     map<eversion_t, hobject_t> &divergent_priors,

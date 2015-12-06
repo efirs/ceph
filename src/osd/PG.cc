@@ -2719,7 +2719,7 @@ void PG::upgrade(ObjectStore *store)
 #pragma GCC diagnostic pop
 #pragma GCC diagnostic warning "-Wpragmas"
 
-int PG::_prepare_write_info(map<string,bufferlist> *km,
+int PG::_prepare_write_info(ceph_map<string,bufferlist> *km,
 			    epoch_t epoch,
 			    pg_info_t &info, coll_t coll,
 			    map<epoch_t,pg_interval_t> &past_intervals,
@@ -2775,7 +2775,7 @@ void PG::_init(ObjectStore::Transaction& t, spg_t pgid, const pg_pool_t *pool)
   t.omap_setkeys(coll, pgmeta_oid, values);
 }
 
-void PG::prepare_write_info(map<string,bufferlist> *km)
+void PG::prepare_write_info(ceph_map<string,bufferlist> *km)
 {
   info.stats.stats.add(unstable_stats);
   unstable_stats.clear();
@@ -2892,9 +2892,10 @@ int PG::peek_map_epoch(ObjectStore *store,
 #pragma GCC diagnostic pop
 #pragma GCC diagnostic warning "-Wpragmas"
 
+
 void PG::write_if_dirty(ObjectStore::Transaction& t)
 {
-  map<string,bufferlist> km;
+  ceph_map<string,bufferlist> km;
   if (dirty_big_info || dirty_info)
     prepare_write_info(&km);
   pg_log.write_log(t, &km, coll, pgmeta_oid, pool.info.require_rollback());
