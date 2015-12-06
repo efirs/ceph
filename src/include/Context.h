@@ -188,6 +188,9 @@ public:
   void take(std::list<ContextType*>& ls) {
     contexts.splice(contexts.end(), ls);
   }
+  void take(ceph_list<ContextType*>& ls) {
+    contexts.insert(contexts.end(), ls.begin(), ls.end());
+  }
   void complete(int r) {
     // Neuter any ContextInstanceType custom complete(), because although
     // I want to look like it, I don't actually want to run its code.
@@ -211,7 +214,22 @@ public:
       return c;
     }
   }
+
+  static ContextType *list_to_context(ceph_list<ContextType *> &cs) {
+    if (cs.size() == 0) {
+      return 0;
+    } else if (cs.size() == 1) {
+      ContextType *c = cs.front();
+      cs.clear();
+      return c;
+    } else {
+      C_ContextsBase<ContextType, ContextInstanceType> *c(new C_ContextsBase<ContextType, ContextInstanceType>(0));
+      c->take(cs);
+      return c;
+    }
+  }
 };
+
 
 typedef C_ContextsBase<Context, Context> C_Contexts;
 
