@@ -543,6 +543,13 @@ public:
     calc_str();
   }
 
+  coll_t(const coll_t& other, bool temp)
+    : type(TYPE_PG_TEMP), pgid(other.pgid), removal_seq(0)
+  {
+    (void)temp;
+    calc_str();
+  }
+
   explicit coll_t(spg_t pgid)
     : type(TYPE_PG), pgid(pgid), removal_seq(0)
   {
