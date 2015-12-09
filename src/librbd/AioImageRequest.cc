@@ -183,7 +183,7 @@ void AioImageRead::send_request() {
                      << extent.length << " from " << extent.buffer_extents
                      << dendl;
 
-      C_AioRead *req_comp = new C_AioRead(cct, m_aio_comp);
+      C_AioRead *req_comp = new(*m_aio_comp) C_AioRead(cct, m_aio_comp);
       AioObjectRead *req = new AioObjectRead(&m_image_ctx, extent.oid.name,
                                              extent.objectno, extent.offset,
                                              extent.length,
@@ -283,7 +283,7 @@ void AbstractAioImageWrite::send_object_requests(
        p != object_extents.end(); ++p) {
     ldout(cct, 20) << " oid " << p->oid << " " << p->offset << "~" << p->length
                    << " from " << p->buffer_extents << dendl;
-    C_AioRequest *req_comp = new C_AioRequest(cct, m_aio_comp);
+    C_AioRequest *req_comp = new(*m_aio_comp) C_AioRequest(cct, m_aio_comp);
     AioObjectRequest *request = create_object_request(*p, snapc, req_comp);
 
     // if journaling, stash the request for later; otherwise send
@@ -330,7 +330,7 @@ void AioImageWrite::send_cache_requests(const ObjectExtents &object_extents,
     bufferlist bl;
     assemble_extent(object_extent, &bl);
 
-    C_AioRequest *req_comp = new C_AioRequest(cct, m_aio_comp);
+    C_AioRequest *req_comp = new(*m_aio_comp) C_AioRequest(cct, m_aio_comp);
     m_image_ctx.write_to_cache(object_extent.oid, bl, object_extent.length,
                                object_extent.offset, req_comp, m_op_flags,
                                journal_tid);
@@ -454,7 +454,7 @@ void AioImageFlush::send_request() {
     m_aio_comp->associate_journal_event(journal_tid);
   }
 
-  C_AioRequest *req_comp = new C_AioRequest(cct, m_aio_comp);
+  C_AioRequest *req_comp = new(*m_aio_comp) C_AioRequest(cct, m_aio_comp);
   m_image_ctx.flush(req_comp);
 
   m_aio_comp->start_op(&m_image_ctx, AIO_TYPE_FLUSH);

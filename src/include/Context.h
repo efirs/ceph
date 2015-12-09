@@ -17,6 +17,7 @@
 #define CEPH_CONTEXT_H
 
 #include "common/dout.h"
+#include "common/pallocator.h"
 
 #include <boost/function.hpp>
 #include <list>
@@ -479,6 +480,25 @@ public:
   }
 private:
   boost::function<void(int)> m_callback;
+};
+
+class PlacedContext : public Context
+{
+  PlacementAllocatorBase* pa;
+
+  PlacedContext() : pa(NULL) { }
+
+ protected:
+  virtual void finish(int r) = 0;
+
+ public:
+  PlacedContext(PlacementAllocatorBase* _pa) : pa(_pa) { }
+
+  virtual void complete(int r) {
+    finish(r);
+    this->~PlacedContext();
+    pa->deallocate();
+  }
 };
 
 #undef mydout

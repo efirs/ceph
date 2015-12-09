@@ -5,6 +5,7 @@
 
 #include "common/Cond.h"
 #include "common/Mutex.h"
+#include "common/pallocator.h"
 #include "include/Context.h"
 #include "include/utime.h"
 #include "include/rbd/librbd.hpp"
@@ -41,7 +42,7 @@ namespace librbd {
    * within the caller's thread of execution (instead via a librados
    * context or via a thread pool context for cache read hits).
    */
-  struct AioCompletion {
+  struct AioCompletion : public PlacementAllocator<512, true> {
     Mutex lock;
     Cond cond;
     bool done;
@@ -161,7 +162,7 @@ namespace librbd {
           m_xlist_item.remove_myself();
           ictx->completed_reqs_lock.Unlock();
         }
-        delete this;
+        deallocate();
       }
     }
 
@@ -189,10 +190,10 @@ namespace librbd {
     }
   };
 
-  class C_AioRequest : public Context {
+  class C_AioRequest : public PlacedContext {
   public:
     C_AioRequest(CephContext *cct, AioCompletion *completion)
-      : m_cct(cct), m_completion(completion) {
+      : PlacedContext(completion), m_cct(cct), m_completion(completion) {
       m_completion->add_request();
     }
     virtual ~C_AioRequest() {}
