@@ -207,6 +207,8 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
     }
     bool get_crc(const pair<size_t, size_t> &fromto,
          pair<uint32_t, uint32_t> *crc) const {
+      if(len <= CEPH_PAGE_SIZE)
+	return false;
       crc_lock.get_read();
       map<pair<size_t, size_t>, pair<uint32_t, uint32_t> >::const_iterator i =
       crc_map.find(fromto);
@@ -220,6 +222,8 @@ static simple_spinlock_t buffer_debug_lock = SIMPLE_SPINLOCK_INITIALIZER;
     }
     void set_crc(const pair<size_t, size_t> &fromto,
          const pair<uint32_t, uint32_t> &crc) {
+      if(len <= CEPH_PAGE_SIZE)
+	return;
       crc_lock.get_write();
       crc_map[fromto] = crc;
       crc_lock.unlock();
