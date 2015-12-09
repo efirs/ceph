@@ -221,7 +221,7 @@ void librados::IoCtxImpl::complete_aio_write(AioCompletionImpl *c)
     ldout(client->cct, 20) << " waking waiters on seq " << waiters->first << dendl;
     for (std::list<AioCompletionImpl*>::iterator it = waiters->second.begin();
 	 it != waiters->second.end(); ++it) {
-      client->finisher.queue(new C_AioCompleteAndSafe(*it));
+      client->finisher.queue(new(*c) C_AioCompleteAndSafe(*it));
       (*it)->put();
     }
     aio_write_waiters.erase(waiters++);
@@ -241,7 +241,7 @@ void librados::IoCtxImpl::flush_aio_writes_async(AioCompletionImpl *c)
   if (aio_write_list.empty()) {
     ldout(client->cct, 20) << "flush_aio_writes_async no writes. (tid "
 			   << seq << ")" << dendl;
-    client->finisher.queue(new C_AioCompleteAndSafe(c));
+    client->finisher.queue(new(*c) C_AioCompleteAndSafe(c));
   } else {
     ldout(client->cct, 20) << "flush_aio_writes_async " << aio_write_list.size()
 			   << " writes in flight; waiting on tid " << seq << dendl;
@@ -684,7 +684,7 @@ int librados::IoCtxImpl::aio_operate_read(const object_t &oid,
 					  int flags,
 					  bufferlist *pbl)
 {
-  Context *onack = new C_aio_Ack(c);
+  Context *onack = new(*c) C_aio_Ack(c);
 
   c->is_read = true;
   c->io = this;
@@ -705,8 +705,8 @@ int librados::IoCtxImpl::aio_operate(const object_t& oid,
   if (snap_seq != CEPH_NOSNAP)
     return -EROFS;
 
-  Context *onack = new C_aio_Ack(c);
-  Context *oncommit = new C_aio_Safe(c);
+  Context *onack = new(*c) C_aio_Ack(c);
+  Context *oncommit = new(*c) C_aio_Safe(c);
 
   c->io = this;
   queue_aio_write(c);
@@ -724,7 +724,7 @@ int librados::IoCtxImpl::aio_read(const object_t oid, AioCompletionImpl *c,
   if (len > (size_t) INT_MAX)
     return -EDOM;
 
-  Context *onack = new C_aio_Ack(c);
+  Context *onack = new(*c) C_aio_Ack(c);
 
   c->is_read = true;
   c->io = this;
@@ -743,7 +743,7 @@ int librados::IoCtxImpl::aio_read(const object_t oid, AioCompletionImpl *c,
   if (len > (size_t) INT_MAX)
     return -EDOM;
 
-  Context *onack = new C_aio_Ack(c);
+  Context *onack = new(*c) C_aio_Ack(c);
 
   c->is_read = true;
   c->io = this;
@@ -778,7 +778,7 @@ int librados::IoCtxImpl::aio_sparse_read(const object_t oid,
   if (len > (size_t) INT_MAX)
     return -EDOM;
 
-  Context *nested = new C_aio_Ack(c);
+  Context *nested = new(*c) C_aio_Ack(c);
   C_ObjectOperation *onack = new C_ObjectOperation(nested);
 
   c->is_read = true;
@@ -805,8 +805,8 @@ int librados::IoCtxImpl::aio_write(const object_t &oid, AioCompletionImpl *c,
   if (snap_seq != CEPH_NOSNAP)
     return -EROFS;
 
-  Context *onack = new C_aio_Ack(c);
-  Context *onsafe = new C_aio_Safe(c);
+  Context *onack = new(*c) C_aio_Ack(c);
+  Context *onsafe = new(*c) C_aio_Safe(c);
 
   c->io = this;
   queue_aio_write(c);
@@ -829,8 +829,8 @@ int librados::IoCtxImpl::aio_append(const object_t &oid, AioCompletionImpl *c,
   if (snap_seq != CEPH_NOSNAP)
     return -EROFS;
 
-  Context *onack = new C_aio_Ack(c);
-  Context *onsafe = new C_aio_Safe(c);
+  Context *onack = new(*c) C_aio_Ack(c);
+  Context *onsafe = new(*c) C_aio_Safe(c);
 
   c->io = this;
   queue_aio_write(c);
@@ -854,8 +854,8 @@ int librados::IoCtxImpl::aio_write_full(const object_t &oid,
   if (snap_seq != CEPH_NOSNAP)
     return -EROFS;
 
-  Context *onack = new C_aio_Ack(c);
-  Context *onsafe = new C_aio_Safe(c);
+  Context *onack = new(*c) C_aio_Ack(c);
+  Context *onsafe = new(*c) C_aio_Safe(c);
 
   c->io = this;
   queue_aio_write(c);
@@ -875,8 +875,8 @@ int librados::IoCtxImpl::aio_remove(const object_t &oid, AioCompletionImpl *c)
   if (snap_seq != CEPH_NOSNAP)
     return -EROFS;
 
-  Context *onack = new C_aio_Ack(c);
-  Context *onsafe = new C_aio_Safe(c);
+  Context *onack = new(*c) C_aio_Ack(c);
+  Context *onsafe = new(*c) C_aio_Safe(c);
 
   c->io = this;
   queue_aio_write(c);
@@ -911,7 +911,7 @@ int librados::IoCtxImpl::aio_cancel(AioCompletionImpl *c)
 int librados::IoCtxImpl::hit_set_list(uint32_t hash, AioCompletionImpl *c,
 			      std::list< std::pair<time_t, time_t> > *pls)
 {
-  Context *onack = new C_aio_Ack(c);
+  Context *onack = new(*c) C_aio_Ack(c);
   c->is_read = true;
   c->io = this;
 
@@ -926,7 +926,7 @@ int librados::IoCtxImpl::hit_set_get(uint32_t hash, AioCompletionImpl *c,
 				     time_t stamp,
 				     bufferlist *pbl)
 {
-  Context *onack = new C_aio_Ack(c);
+  Context *onack = new(*c) C_aio_Ack(c);
   c->is_read = true;
   c->io = this;
 
@@ -1007,7 +1007,7 @@ int librados::IoCtxImpl::aio_exec(const object_t& oid, AioCompletionImpl *c,
 				  const char *cls, const char *method,
 				  bufferlist& inbl, bufferlist *outbl)
 {
-  Context *onack = new C_aio_Ack(c);
+  Context *onack = new(*c) C_aio_Ack(c);
 
   c->is_read = true;
   c->io = this;
@@ -1418,7 +1418,7 @@ int librados::IoCtxImpl::cache_unpin(const object_t& oid)
 
 ///////////////////////////// C_aio_Ack ////////////////////////////////
 
-librados::IoCtxImpl::C_aio_Ack::C_aio_Ack(AioCompletionImpl *_c) : c(_c)
+librados::IoCtxImpl::C_aio_Ack::C_aio_Ack(AioCompletionImpl *_c) : PlacedContext(_c), c(_c)
 {
   assert(!c->io);
   c->get();
@@ -1438,10 +1438,10 @@ void librados::IoCtxImpl::C_aio_Ack::finish(int r)
   }
 
   if (c->callback_complete) {
-    c->io->client->finisher.queue(new C_AioComplete(c));
+    c->io->client->finisher.queue(new(*c) C_AioComplete(c));
   }
   if (c->is_read && c->callback_safe) {
-    c->io->client->finisher.queue(new C_AioSafe(c));
+    c->io->client->finisher.queue(new(*c) C_AioSafe(c));
   }
 
   c->put_unlock();
@@ -1451,7 +1451,7 @@ void librados::IoCtxImpl::C_aio_Ack::finish(int r)
 
 librados::IoCtxImpl::C_aio_stat_Ack::C_aio_stat_Ack(AioCompletionImpl *_c,
 						    time_t *pm)
-   : c(_c), pmtime(pm)
+   : PlacedContext(_c), c(_c), pmtime(pm)
 {
   assert(!c->io);
   c->get();
@@ -1469,7 +1469,7 @@ void librados::IoCtxImpl::C_aio_stat_Ack::finish(int r)
   }
 
   if (c->callback_complete) {
-    c->io->client->finisher.queue(new C_AioComplete(c));
+    c->io->client->finisher.queue(new(*c) C_AioComplete(c));
   }
 
   c->put_unlock();
@@ -1477,7 +1477,7 @@ void librados::IoCtxImpl::C_aio_stat_Ack::finish(int r)
 
 //////////////////////////// C_aio_Safe ////////////////////////////////
 
-librados::IoCtxImpl::C_aio_Safe::C_aio_Safe(AioCompletionImpl *_c) : c(_c)
+librados::IoCtxImpl::C_aio_Safe::C_aio_Safe(AioCompletionImpl *_c) : PlacedContext(_c), c(_c)
 {
   c->get();
 }
@@ -1493,7 +1493,7 @@ void librados::IoCtxImpl::C_aio_Safe::finish(int r)
   c->cond.Signal();
 
   if (c->callback_safe) {
-    c->io->client->finisher.queue(new C_AioSafe(c));
+    c->io->client->finisher.queue(new(*c) C_AioSafe(c));
   }
 
   c->io->complete_aio_write(c);

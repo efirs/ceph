@@ -23,10 +23,11 @@
 #include "include/rados/librados.hpp"
 #include "include/xlist.h"
 #include "osd/osd_types.h"
+#include "common/pallocator.h"
 
 class IoCtxImpl;
 
-struct librados::AioCompletionImpl {
+struct librados::AioCompletionImpl : public PlacementAllocator<256, true> {
   Mutex lock;
   Cond cond;
   int ref, rval;
@@ -162,15 +163,15 @@ struct librados::AioCompletionImpl {
     int n = --ref;
     lock.Unlock();
     if (!n)
-      delete this;
+      deallocate();
   }
 };
 
 namespace librados {
-struct C_AioComplete : public Context {
+struct C_AioComplete : public PlacedContext {
   AioCompletionImpl *c;
 
-  C_AioComplete(AioCompletionImpl *cc) : c(cc) {
+  C_AioComplete(AioCompletionImpl *cc) : PlacedContext(cc), c(cc) {
     c->_get();
   }
 
@@ -186,10 +187,10 @@ struct C_AioComplete : public Context {
   }
 };
 
-struct C_AioSafe : public Context {
+struct C_AioSafe : public PlacedContext {
   AioCompletionImpl *c;
 
-  C_AioSafe(AioCompletionImpl *cc) : c(cc) {
+  C_AioSafe(AioCompletionImpl *cc) : PlacedContext(cc), c(cc) {
     c->_get();
   }
 
@@ -213,10 +214,10 @@ struct C_AioSafe : public Context {
   * flush where we only want to wait for things to be safe,
   * but allow users to specify any of the callbacks.
   */
-struct C_AioCompleteAndSafe : public Context {
+struct C_AioCompleteAndSafe : public PlacedContext {
   AioCompletionImpl *c;
 
-  C_AioCompleteAndSafe(AioCompletionImpl *cc) : c(cc) {
+  C_AioCompleteAndSafe(AioCompletionImpl *cc) : PlacedContext(cc), c(cc) {
     c->get();
   }
 

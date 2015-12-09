@@ -18,6 +18,7 @@
 #include "common/Cond.h"
 #include "common/Mutex.h"
 #include "common/snap_types.h"
+#include "common/pallocator.h"
 #include "include/atomic.h"
 #include "include/types.h"
 #include "include/rados/librados.h"
@@ -159,13 +160,13 @@ struct librados::IoCtxImpl {
   int aio_operate_read(const object_t& oid, ::ObjectOperation *o,
 		       AioCompletionImpl *c, int flags, bufferlist *pbl);
 
-  struct C_aio_Ack : public Context {
+  struct C_aio_Ack : public PlacedContext {
     librados::AioCompletionImpl *c;
     C_aio_Ack(AioCompletionImpl *_c);
     void finish(int r);
   };
 
-  struct C_aio_stat_Ack : public Context {
+  struct C_aio_stat_Ack : public PlacedContext {
     librados::AioCompletionImpl *c;
     time_t *pmtime;
     ceph::real_time mtime;
@@ -173,7 +174,7 @@ struct librados::IoCtxImpl {
     void finish(int r);
   };
 
-  struct C_aio_Safe : public Context {
+  struct C_aio_Safe : public PlacedContext {
     AioCompletionImpl *c;
     C_aio_Safe(AioCompletionImpl *_c);
     void finish(int r);
